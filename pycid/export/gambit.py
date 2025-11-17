@@ -79,25 +79,26 @@ def macid_to_efg(
                 parents_actions_tuple = (agent, tuple(parents_actions.items()))  # hashable
                 # check if this matches an existing infoset
                 if parents_actions_tuple in parents_to_infoset:
-                    cur_infoset = parents_to_infoset[parents_actions_tuple]
-                    cur_node.append_move(cur_infoset)
+                    game.set_infoset(cur_node, parents_to_infoset[parents_actions_tuple])
+                    game.append_move(cur_node, cur_node.infoset)
                 # else create a new infoset
                 else:
-                    cur_infoset = cur_node.append_move(player, len(actions))
+                    game.append_move(cur_node, player, actions)
+                    game.set_infoset(cur_node, cur_node.infoset)
                     # label with the node for easy reference
-                    cur_infoset.label = node
+                    cur_node.infoset.label = node
                     # add to infosets
-                    parents_to_infoset[parents_actions_tuple] = cur_infoset
+                    parents_to_infoset[parents_actions_tuple] = cur_node.infoset
                 # add state info
                 for action_idx, action in enumerate(actions):
-                    cur_infoset.actions[action_idx].label = str(action)
+                    cur_node.infoset.actions[action_idx].label = str(action)
                     state_info = node_idx_to_state[node_idx].copy()
                     state_info.update({node: action})
                     node_idx_to_state[node_idx + (action_idx,)] = state_info
             else:
                 # otherwise is a chance node
                 factor = macid.query([node], context=parents_actions)
-                move = cur_node.append_move(game.players.chance, factor.cardinality)
+                move = game.append_move(cur_node, game.players.chance, factor.cardinality)
                 # add state info
                 actions = macid.model.domain[node]
                 for action_idx, prob in enumerate(factor.values):
@@ -118,8 +119,7 @@ def macid_to_gambit_file(macid: MACIDBase, filename: str = "macid.efg") -> bool:
     - macid: The MACID object to convert to a pygambit EFG.
     - filename: The filename to save the EFG to (default: macid.efg)."""
     game, _ = macid_to_efg(macid)
-    with open(filename, "w") as f:
-        f.write(game.write())
+    game.to_efg(filename)
     print("\nGambit .efg file has been created from the macid")
 
     return True
@@ -168,7 +168,8 @@ def pygambit_ne_solver(
     else:
         raise ValueError(f"Solver {solver} not recognised")
     # convert to behavior strategies
-    behavior_strategies = [x.as_behavior() if solver not in ["lp", "lcp"] else x for x in mixed_strategies]
+    # behavior_strategies = [x.as_behavior() if solver not in ["lp", "lcp"] else x for x in mixed_strategies]
+    behavior_strategies = mixed_strategies.equilibria
 
     return behavior_strategies
 
@@ -228,7 +229,7 @@ def _add_players(game: pygambit.Game, agents_in_sg: Iterable[Hashable]) -> Dict[
     """add players to the pygambit game"""
     agent_to_player = {}
     for agent in agents_in_sg:
-        player = game.players.add(agent)
+        player = game.add_player(str(agent))
         agent_to_player[agent] = player
 
     return agent_to_player
@@ -246,11 +247,13 @@ def _add_payoffs(
         cur_node = _get_cur_node(game, node_idx)
         context = node_idx_to_state[node_idx]
         # name outcome as a string of the node_idx
-        payoff_tuple = game.outcomes.add(str(node_idx))
+        payoff_tuple = list()  # game.add_outcomes(str(node_idx))
         for i, agent in enumerate(agents_in_sg):
             payoff = macid.expected_utility(context=context, agent=agent)
-            payoff_tuple[i] = pygambit.Decimal(payoff)
-        cur_node.outcome = payoff_tuple
+            payoff_tuple.append(pygambit.Decimal(payoff))
+        outcome = game.add_outcome(payoff_tuple, str(node_idx))
+        game.set_outcome(cur_node, outcome)
+        # cur_node.outcome = payoff_tuple
 
     return game
 
